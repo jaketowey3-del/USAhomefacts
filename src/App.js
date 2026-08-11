@@ -32,6 +32,8 @@ export default function App() {
   const [property, setProperty] = useState('');
   const [beds, setBeds] = useState('3');
   const [baths, setBaths] = useState('2');
+  const [stories, setStories] = useState('1');
+  const [sqft, setSqft] = useState('2000');
   const [responses, setResponses] = useState({});
   const [notes, setNotes] = useState({});
   const [photos, setPhotos] = useState({});
@@ -196,25 +198,35 @@ export default function App() {
     setPublicReports(inspections);
 
     let totalScoreSum = 0, globalMinCost = 0, globalMaxCost = 0;
+    const matrixKeys = Object.keys(costMatrix);
+    const maxPossibleScore = matrixKeys.length > 0 ? matrixKeys.length * 5 : 1;
+
     inspections.forEach(insp => {
       // Handle responses whether they are stored nested or directly
       const resp = insp.property_data?.responses || insp.responses || {};
       let propScoreTotal = 0;
-      Object.keys(costMatrix).forEach(id => {
+      
+      matrixKeys.forEach(id => {
         const itemScore = Number(resp[id] ?? 5);
-        propScoreTotal += itemScore;
+        propScoreTotal += isNaN(itemScore) ? 5 : itemScore;
         if (itemScore < 5) {
           const bounds = costMatrix[id];
-          const scaleFactor = itemScore === 4 ? 0.15 : itemScore === 3 ? 0.40 : itemScore === 2 ? 0.75 : 1.0;
-          globalMinCost += (bounds.min * scaleFactor);
-          globalMaxCost += (bounds.max * scaleFactor);
+          if (bounds) {
+            const scaleFactor = itemScore === 4 ? 0.15 : itemScore === 3 ? 0.40 : itemScore === 2 ? 0.75 : 1.0;
+            globalMinCost += (bounds.min * scaleFactor);
+            globalMaxCost += (bounds.max * scaleFactor);
+          }
         }
       });
-      totalScoreSum += Math.round((propScoreTotal / (50 * 5)) * 100);
+
+      const reportPercentage = (propScoreTotal / maxPossibleScore) * 100;
+      totalScoreSum += isNaN(reportPercentage) ? 100 : reportPercentage;
     });
 
+    const avgScoreResult = inspections.length > 0 ? Math.round(totalScoreSum / inspections.length) : 0;
+
     setCommunitySummary({
-      avgScore: Math.round(totalScoreSum / inspections.length),
+      avgScore: isNaN(avgScoreResult) ? 0 : avgScoreResult,
       totalReviews: inspections.length,
       estimatedMarketRepairsMin: Math.round(globalMinCost / inspections.length),
       estimatedMarketRepairsMax: Math.round(globalMaxCost / inspections.length)
@@ -327,7 +339,9 @@ export default function App() {
   const buttonStyle = { width: '100%', padding: '12px', borderRadius: '8px', border: 'none', background: '#3b82f6', color: 'white', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', marginTop: '10px' };
 
   const getItemRepairCost = (id) => {
-    const score = Number(responses[id] ?? 5); 
+    const val = responses[id] ?? 5;
+    if (val === 'NA') return { min: 0, max: 0 };
+    const score = Number(val);
     const bounds = costMatrix[id]; 
     if (!bounds || score === 5) return { min: 0, max: 0 };
     const scaleFactor = score === 4 ? 0.15 : score === 3 ? 0.40 : score === 2 ? 0.75 : 1.0;
@@ -351,14 +365,16 @@ export default function App() {
     }); 
     return { min, max };
   };
-
   const getCategoryScore = (catName) => {
     let scoreSum = 0;
     let itemCount = 0;
     Object.keys(costMatrix).forEach(id => {
       if (costMatrix[id].cat === catName) {
-        scoreSum += Number(responses[id] ?? 5);
-        itemCount++;
+        const val = responses[id] ?? 5;
+        if (val !== 'NA') {
+          scoreSum += Number(val);
+          itemCount++;
+        }
       }
     });
     return itemCount > 0 ? Math.round((scoreSum / (itemCount * 5)) * 100) : 100;
@@ -439,17 +455,6 @@ export default function App() {
             }}
             style={{ ...inputStyle, backgroundColor: '#ffffff', color: '#000000', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '10px', width: '100%', boxSizing: 'border-box', fontSize: '16px', marginBottom: '15px' }}
           />
-
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-            <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', color: '#ffffff', fontWeight: 'bold', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>Bedrooms</label>
-              <input type="number" placeholder="Beds" value={beds} onChange={(e) => setBeds(e.target.value)} style={{ ...inputStyle, width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#ffffff', color: '#000000', boxSizing: 'border-box' }} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', color: '#ffffff', fontWeight: 'bold', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>Bathrooms</label>
-              <input type="number" placeholder="Baths" value={baths} onChange={(e) => setBaths(e.target.value)} style={{ ...inputStyle, width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#ffffff', color: '#000000', boxSizing: 'border-box' }} />
-            </div>
-          </div>
 
           <button 
             onClick={async () => {
@@ -648,8 +653,8 @@ export default function App() {
             <div style={{ textTransform: 'uppercase', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px' }}>Community Facts Profile</div>
             <div style={{ fontSize: '3rem', fontWeight: 'bold', margin: '10px 0', color: '#ffffff' }}>{communitySummary.avgScore}%</div>
             <div style={{ fontSize: '15px' }}>Based on <strong>{communitySummary.totalReviews} public user reports</strong></div>
-            <div style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid #000000', fontSize: '14px' }}>
-              Average Market Repair Liabilities Estimate: <strong>${communitySummary.estimatedMarketRepairsMin.toLocaleString()} - ${communitySummary.estimatedMarketRepairsMax.toLocaleString()}</strong>
+            <div style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid #000000', fontSize: '28px', color: '#ff3366', fontWeight: 'bold' }}>
+              Average property Repair/ update Liabilities Estimate: <br /><strong>${communitySummary.estimatedMarketRepairsMin.toLocaleString()} - ${communitySummary.estimatedMarketRepairsMax.toLocaleString()}</strong>
             </div>
           </div>
         ) : (
@@ -709,44 +714,69 @@ export default function App() {
         background: 'linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4)), url("https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&q=80&w=2000")',
         backgroundSize: 'cover',
         backgroundPosition: 'bottom',
-        padding: '20px',
+        padding: '30px',
         color: '#ffffff',
-        textShadow: '0 0 2px #000000, 0 0 2px #000000, 0 0 2px #000000, 0 0 2px #000000'
+        textShadow: '0 0 3px #000000, 0 0 3px #000000'
       }}>
         <h2 style={{ 
           textAlign: 'center', 
-          color: '#ffffff'
+          color: '#ffffff',
+          fontSize: '32px', // Doubled heading size
+          marginBottom: '25px'
         }}>
           📐 Step 1: Property Matrix Boundaries
         </h2>
         
         <div style={{ ...cardStyle, backgroundColor: 'transparent', border: '1px solid #000000' }}>
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+          <div style={{ display: 'flex', gap: '15px', marginBottom: '20px' }}>
             <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: 'bold' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '26px', fontWeight: 'bold' }}>
                 Bedrooms
               </label>
-              <select value={beds} onChange={(e) => setBeds(e.target.value)} style={{ ...selectStyle, width: '100%', appearance: 'auto' }}>
-                {['1','2','3','4','5'].map(v => <option key={v} value={v} style={{color:'black'}}>{v} Beds</option>)}
+              <select value={beds} onChange={(e) => setBeds(e.target.value)} style={{ ...selectStyle, width: '100%', appearance: 'auto', fontSize: '24px', padding: '12px' }}>
+                {['1','2','3','4','5'].map(v => <option key={v} value={v} style={{color:'black', fontSize: '20px'}}>{v} Beds</option>)}
               </select>
             </div>
             <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: 'bold' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '26px', fontWeight: 'bold' }}>
                 Bathrooms
               </label>
-              <select value={baths} onChange={(e) => setBaths(e.target.value)} style={{ ...selectStyle, width: '100%', appearance: 'auto' }}>
-                {['1','2','3','4'].map(v => <option key={v} value={v} style={{color:'black'}}>{v} Baths</option>)}
+              <select value={baths} onChange={(e) => setBaths(e.target.value)} style={{ ...selectStyle, width: '100%', appearance: 'auto', fontSize: '24px', padding: '12px' }}>
+                {['1','2','3','4'].map(v => <option key={v} value={v} style={{color:'black', fontSize: '20px'}}>{v} Baths</option>)}
               </select>
             </div>
           </div>
+
+          <div style={{ display: 'flex', gap: '15px', marginBottom: '25px' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '26px', fontWeight: 'bold' }}>
+                Stories
+              </label>
+              <select value={stories} onChange={(e) => setStories(e.target.value)} style={{ ...selectStyle, width: '100%', appearance: 'auto', fontSize: '24px', padding: '12px' }}>
+                {['1','2','3'].map(v => <option key={v} value={v} style={{color:'black', fontSize: '20px'}}>{v} {v === '1' ? 'Story' : 'Stories'}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '26px', fontWeight: 'bold' }}>
+                Square Footage
+              </label>
+              <input 
+                type="number" 
+                value={sqft} 
+                onChange={(e) => setSqft(e.target.value)} 
+                placeholder="e.g. 2000" 
+                style={{ ...inputStyle, width: '100%', boxSizing: 'border-box', background: 'transparent', color: 'white', border: '1px solid #ffffff', fontSize: '24px', padding: '12px' }} 
+              />
+            </div>
+          </div>
           
-          <button onClick={() => setScreen('checklist')} style={{ ...buttonStyle, marginBottom: '10px', border: '1px solid #000000' }}>
+          <button onClick={() => setScreen('checklist')} style={{ ...buttonStyle, marginBottom: '15px', border: '1px solid #000000', fontSize: '24px', padding: '16px' }}>
             Continue to Inspection Sheet
           </button>
           
           <button 
             onClick={() => setScreen('home')} 
-            style={{ ...buttonStyle, background: '#94a3b8', width: '100%', border: '1px solid #000000' }}
+            style={{ ...buttonStyle, background: '#94a3b8', width: '100%', border: '1px solid #000000', fontSize: '24px', padding: '16px' }}
           >
             Cancel
           </button>
@@ -839,57 +869,98 @@ export default function App() {
           </div>
 
           {categoriesData.map((cat) => {
-            const score = getCategoryScore(cat.name);
-            const catCosts = getCategoryRepairCost(cat.name);
-            const isExpanded = openCategories.includes(cat.name);
+          const score = getCategoryScore(cat.name);
+          const catCosts = getCategoryRepairCost(cat.name);
+          const isExpanded = openCategories.includes(cat.name);
 
-            return (
-              <div key={cat.name} style={{ ...cardStyle, border: '1px solid #000000' }}>
-                <div onClick={() => setOpenCategories(isExpanded ? openCategories.filter(c => c !== cat.name) : [...openCategories, cat.name])} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}><span style={{ fontSize: '20px' }}>{cat.icon}</span><span style={{ fontWeight: 'bold' }}>{cat.name}</span></div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span style={{ background: getColor(score), color: '#0f172a', padding: '3px 8px', borderRadius: '12px', fontWeight: 'bold', fontSize: '13px' }}>{score}%</span><span>{isExpanded ? '▲' : '▼'}</span>
-                  </div>
+          return (
+            <div key={cat.name} style={{ ...cardStyle, border: '1px solid #000000' }}>
+              <div onClick={() => setOpenCategories(isExpanded ? openCategories.filter(c => c !== cat.name) : [...openCategories, cat.name])} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}><span style={{ fontSize: '20px' }}>{cat.icon}</span><span style={{ fontWeight: 'bold' }}>{cat.name}</span></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ background: getColor(score), color: '#0f172a', padding: '3px 8px', borderRadius: '12px', fontWeight: 'bold', fontSize: '13px' }}>{score}%</span><span>{isExpanded ? '▲' : '▼'}</span>
                 </div>
-
-                {isExpanded && (
-                  <div style={{ marginTop: '15px', borderTop: '1px solid #000000', paddingTop: '15px' }}>
-                    <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px 15px', borderRadius: '6px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Running Cost:</span>
-                      <span style={{ fontWeight: 'bold', color: catCosts.max > 0 ? '#fda4af' : '#4ade80' }}>${catCosts.min.toLocaleString()} - ${catCosts.max.toLocaleString()}</span>
-                    </div>
-
-                    {Object.keys(costMatrix).filter(id => costMatrix[id].cat === cat.name).map(id => {
-                      const item = costMatrix[id];
-                      const itemScore = Number(responses[id] ?? 5);
-                      const itemCost = getItemRepairCost(id);
-
-                      return (
-                        <div key={id} style={{ marginBottom: '20px', background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '8px', border: '1px solid #000000' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                            <span style={{ fontWeight: '500' }}>{item.icon} {item.label} <span style={{ color: getColor(itemScore * 20), marginLeft: '8px', fontWeight: 'bold' }}>({itemScore}/5)</span></span>
-                          </div>
-                          <input type="range" min="1" max="5" value={itemScore} onChange={(e) => setResponses({ ...responses, [id]: e.target.value })} style={{ width: '100%' }} />
-                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 5px', fontSize: '10px', marginBottom: '10px' }}>
-                            {[1,2,3,4,5].map(n => <span key={n}>{n}</span>)}
-                          </div>
-                          <div style={{ fontSize: '13px', color: itemCost.max > 0 ? '#fda4af' : '#cbd5e1', marginTop: '4px' }}>Current Market Cost Variance: ${itemCost.min.toLocaleString()} - ${itemCost.max.toLocaleString()}</div>
-                          <input placeholder="Add descriptive notes..." value={notes[id] || ''} onChange={(e) => setNotes({ ...notes, [id]: e.target.value })} style={{ ...inputStyle, fontSize: '13px', padding: '6px', marginTop: '8px', background: 'transparent', color: 'white', border: '1px solid #ffffff' }} />
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
-                            <label style={{ cursor: 'pointer', background: '#334155', padding: '5px 10px', borderRadius: '4px', fontSize: '12px', border: '1px solid #ffffff' }}>
-                              Add photo
-                              <input type="file" accept="image/*" onChange={(e) => handlePhoto(id, e.target.files)} style={{ display: 'none' }} />
-                            </label>
-                            {photos[id] && <img src={photos[id]} alt="Evidence" style={{ width: '40px', height: '40px', borderRadius: '4px', objectFit: 'cover', border: '1px solid #ffffff' }} />}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
-            );
-          })}
+
+              {isExpanded && (
+                <div style={{ marginTop: '15px', borderTop: '1px solid #000000', paddingTop: '15px' }}>
+                  <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px 15px', borderRadius: '6px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Running Cost:</span>
+                    <span style={{ fontWeight: 'bold', color: catCosts.max > 0 ? '#fda4af' : '#4ade80' }}>${catCosts.min.toLocaleString()} - ${catCosts.max.toLocaleString()}</span>
+                  </div>
+
+                  {Object.keys(costMatrix).filter(id => costMatrix[id].cat === cat.name).map(id => {
+                    const item = costMatrix[id];
+                    const rawVal = responses[id] ?? 5;
+                    const isNA = rawVal === 'NA';
+                    const itemScore = isNA ? 'N/A' : Number(rawVal);
+                    const itemCost = getItemRepairCost(id);
+
+                    return (
+                      <div key={id} style={{ marginBottom: '20px', background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '8px', border: '1px solid #000000' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span style={{ fontWeight: '500' }}>{item.icon} {item.label} <span style={{ color: isNA ? '#94a3b8' : getColor(itemScore * 20), marginLeft: '8px', fontWeight: 'bold' }}>({isNA ? 'N/A' : `${itemScore}/5`})</span></span>
+                        </div>
+
+                        {/* Clickable Tick Marks & N/A Selection Row */}
+                        <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+                          {[1, 2, 3, 4, 5].map(n => (
+                            <button
+                              key={n}
+                              type="button"
+                              onClick={() => setResponses({ ...responses, [id]: String(n) })}
+                              style={{
+                                flex: 1,
+                                padding: '8px 0',
+                                background: !isNA && Number(itemScore) === n ? '#3b82f6' : 'rgba(255,255,255,0.1)',
+                                color: 'white',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: '4px',
+                                fontWeight: 'bold',
+                                cursor: 'pointer',
+                                fontSize: '14px'
+                              }}
+                            >
+                              {n}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => setResponses({ ...responses, [id]: 'NA' })}
+                            style={{
+                              padding: '8px 12px',
+                              background: isNA ? '#64748b' : 'rgba(255,255,255,0.1)',
+                              color: 'white',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '4px',
+                              fontWeight: 'bold',
+                              cursor: 'pointer',
+                              fontSize: '12px'
+                            }}
+                          >
+                            N/A
+                          </button>
+                        </div>
+
+                        <div style={{ fontSize: '13px', color: isNA ? '#94a3b8' : (itemCost.max > 0 ? '#fda4af' : '#cbd5e1'), marginTop: '4px' }}>
+                          {isNA ? 'Item marked as Not Applicable (Excluded from score & costs)' : `Current Market Cost Variance: $${itemCost.min.toLocaleString()} - $${itemCost.max.toLocaleString()}`}
+                        </div>
+                        <input placeholder="Add descriptive notes..." value={notes[id] || ''} onChange={(e) => setNotes({ ...notes, [id]: e.target.value })} style={{ ...inputStyle, fontSize: '13px', padding: '6px', marginTop: '8px', background: 'transparent', color: 'white', border: '1px solid #ffffff' }} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
+                          <label style={{ cursor: 'pointer', background: '#334155', padding: '5px 10px', borderRadius: '4px', fontSize: '12px', border: '1px solid #ffffff' }}>
+                            Add photo
+                            <input type="file" accept="image/*" onChange={(e) => handlePhoto(id, e.target.files)} style={{ display: 'none' }} />
+                          </label>
+                          {photos[id] && <img src={photos[id]} alt="Evidence" style={{ width: '40px', height: '40px', borderRadius: '4px', objectFit: 'cover', border: '1px solid #ffffff' }} />}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
 
           <div style={{ display: 'flex', marginTop: '20px' }}>
             <button onClick={() => setScreen('summary')} style={{ ...buttonStyle, background: '#6366f1', border: '1px solid #000000' }}>
@@ -902,8 +973,7 @@ export default function App() {
         </div>
       );
     }
-  }
-  if (screen === 'summary') {
+  } else if (screen === 'summary') {
     const getGlobalRepairCost = () => {
       let globalMinCost = 0;
       let globalMaxCost = 0;
@@ -921,9 +991,9 @@ export default function App() {
       
       return { min: Math.round(globalMinCost), max: Math.round(globalMaxCost) };
     };
-
+  
     const runningGlobalTotal = getGlobalRepairCost();
-
+  
     content = (
       <div style={{
         ...pageStyle,
@@ -943,22 +1013,24 @@ export default function App() {
             <p style={{ margin: 0 }}>MLS ID: {property} | Estimated Repairs: ${runningGlobalTotal.min.toLocaleString()} - ${runningGlobalTotal.max.toLocaleString()}</p>
           </div>
           
-          <button style={{ ...buttonStyle, width: 'auto', marginTop: 0, background: '#475569' }} onClick={() => setScreen('checklist')}>
-            ← Back to Checklist
-          </button>
+          <div>
+            <button style={{ ...buttonStyle, width: 'auto', marginTop: 0, background: '#475569' }} onClick={() => setScreen('checklist')}>
+              ← Back to Checklist
+            </button>
+          </div>
         </div>
-
+  
         <div style={{ ...cardStyle, background: 'rgba(15, 23, 42, 0.8)', border: '1px solid #000000', marginBottom: '20px' }}>
           <h3 style={{ color: 'white', marginBottom: '15px' }}>Inspection Overview</h3>
           <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.5' }}>
             Review your scored categories and itemized notes below before saving or finalizing your report.
           </p>
         </div>
-
+  
         {categoriesData.map((cat) => {
           const score = getCategoryScore(cat.name);
           const catCosts = getCategoryRepairCost(cat.name);
-
+  
           return (
             <div key={cat.name} style={{ ...cardStyle, border: '1px solid #000000', marginBottom: '15px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -976,10 +1048,13 @@ export default function App() {
             </div>
           );
         })}
-
-        <div style={{ display: 'flex', marginTop: '20px' }}>
-          <button onClick={saveReport} style={{ ...buttonStyle, background: '#16a34a', border: '1px solid #000000' }}>
+  
+        <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+          <button onClick={saveReport} style={{ ...buttonStyle, flex: 1, background: '#16a34a', border: '1px solid #000000', margin: 0 }}>
             💾 Save Report to Profile
+          </button>
+          <button onClick={() => setScreen('home')} style={{ ...buttonStyle, flex: 1, background: '#334155', border: '1px solid #000000', margin: 0 }}>
+            🏠 Back to Home
           </button>
         </div>
       </div>
