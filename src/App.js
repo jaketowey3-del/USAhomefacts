@@ -23,11 +23,16 @@ const supabase = createClient(
 
 // Define AdBanner outside the main App component
 const AdBanner = ({ client, slot }) => {
+  const pushedRef = React.useRef(false);
+
   useEffect(() => {
-    try {
-      (window.adsbygoogle = window.adsbygoogle || []).push({});
-    } catch (e) {
-      console.error("AdSense error:", e);
+    if (!pushedRef.current) {
+      try {
+        (window.adsbygoogle = window.adsbygoogle || []).push({});
+        pushedRef.current = true;
+      } catch (e) {
+        console.error("AdSense error:", e);
+      }
     }
   }, []);
 
@@ -42,7 +47,6 @@ const AdBanner = ({ client, slot }) => {
     </div>
   );
 };
-
 export default function App() {
   const [session, setSession] = useState(null);
   const [activeProperty, setActiveProperty] = useState(null);
@@ -468,7 +472,7 @@ export default function App() {
           </div>
 
           <div style={{ textAlign: 'center', marginBottom: '35px', color: 'white', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
-            <h1>🏡 USA Home Facts Public Domain</h1>
+            <h1>🏡 USA Home Facts (est. 2026)</h1>
             <p style={{ color: '#f1f5f9' }}>Crowdsourced Transparency Matrix (Like CARFAX for Homes)</p>
           </div>
           
