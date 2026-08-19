@@ -5,7 +5,6 @@ import { costMatrix, categoriesData, stateCostMultipliers } from './propertyData
 import { createClient } from '@supabase/supabase-js';
 import Auth from './Auth.js';
 import './style.css';
-import { localAdInventory, getTopTwoWeakestCategories } from './localAds.js';
 
 const supabase = createClient(
   'https://coxkznpuqtuweijetdja.supabase.co',
@@ -21,6 +20,28 @@ const supabase = createClient(
     },
   }
 );
+
+// Define AdBanner outside the main App component
+const AdBanner = ({ client, slot }) => {
+  useEffect(() => {
+    try {
+      (window.adsbygoogle = window.adsbygoogle || []).push({});
+    } catch (e) {
+      console.error("AdSense error:", e);
+    }
+  }, []);
+
+  return (
+    <div style={{ textAlign: 'center', margin: '20px 0', overflow: 'hidden' }}>
+      <ins className="adsbygoogle"
+           style={{ display: 'block' }}
+           data-ad-client={client}
+           data-ad-slot={slot}
+           data-ad-format="auto"
+           data-full-width-responsive="true"></ins>
+    </div>
+  );
+};
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -55,7 +76,6 @@ export default function App() {
       }
     });
   }, []);
-
   useEffect(() => {
     if (screen === 'profile' && session?.user?.id) {
       const fetchProfileData = async () => {
@@ -198,7 +218,7 @@ export default function App() {
     if (!inspections || inspections.length === 0) {
       setPublicReports([]);
       setCommunitySummary(null);
-      alert("No public records found for this MLS number in " + activeState);
+      // alert("No public records found for this MLS number in " + activeState);
       return;
     }
 
@@ -350,7 +370,7 @@ export default function App() {
   const selectStyle = { ...inputStyle, cursor: 'pointer', appearance: 'none', background: 'rgba(255,255,255,0.15) url("data:image/svg+xml;utf8,<svg fill=\'white\' height=\'24\' viewBox=\'0 0 24 24\' width=\'24\' xmlns=\'http://w3.org\'><path d=\'M7 10l5 5 5-5z\'/></svg>") no-repeat right 10px center' };
   const buttonStyle = { width: '100%', padding: '12px', borderRadius: '8px', border: 'none', background: '#3b82f6', color: 'white', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', marginTop: '10px' };
 
-  const getItemRepairCost = (id) => {
+  const getItemRepairCost = (id, targetState = state) => {
     const val = responses[id] ?? 5;
     if (val === 'NA') return { min: 0, max: 0 };
     const score = Number(val);
@@ -363,20 +383,29 @@ export default function App() {
     } else if (bounds.cat === 'Plumbing' || bounds.cat === 'Bathroom') {
       sizeMultiplier = Number(baths) <= 1 ? 0.7 : Number(baths) === 2 ? 1.0 : Number(baths) === 3 ? 1.3 : 1.6;
     }
-    return { min: Math.round(bounds.min * scaleFactor * sizeMultiplier), max: Math.round(bounds.max * scaleFactor * sizeMultiplier) };
+
+    // Apply state economic multiplier index using targetState
+    const rawStateMultiplier = stateCostMultipliers[targetState?.toUpperCase()] || stateCostMultipliers.DEFAULT || 750;
+    const stateFactor = rawStateMultiplier / 750;
+
+    return { 
+      min: Math.round(bounds.min * scaleFactor * sizeMultiplier * stateFactor), 
+      max: Math.round(bounds.max * scaleFactor * sizeMultiplier * stateFactor) 
+    };
   };
 
-  const getCategoryRepairCost = (catName) => {
+  const getCategoryRepairCost = (catName, targetState = state) => {
     let min = 0, max = 0; 
     Object.keys(costMatrix).forEach(id => { 
       if (costMatrix[id].cat === catName) { 
-        const c = getItemRepairCost(id); 
+        const c = getItemRepairCost(id, targetState); 
         min += c.min; 
         max += c.max; 
       } 
     }); 
     return { min, max };
   };
+
   const getCategoryScore = (catName) => {
     let scoreSum = 0;
     let itemCount = 0;
@@ -392,10 +421,7 @@ export default function App() {
     return itemCount > 0 ? Math.round((scoreSum / (itemCount * 5)) * 100) : 100;
   };
 
-
-  let content;
-
-  if (screen === 'welcome') {
+  let content;  if (screen === 'welcome') {
     content = (
       <div style={{ 
         ...pageStyle, 
@@ -422,42 +448,70 @@ export default function App() {
       <div style={{
         ...pageStyle,
         minHeight: '100vh',
-        background: 'linear-gradient(rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.2)), url("https://images.unsplash.com/photo-1499793983690-e29da59ef1c2?auto=format&fit=crop&w=2000&q=80")',
+        background: 'linear-gradient(rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.2)), url("https://images.unsplash.com/photo-1499793983690-e29da59ef1c2?auto=format&fit=crop&q=80&w=2000")',
         backgroundSize: 'cover',
         backgroundPosition: 'bottom',
         backgroundAttachment: 'fixed',
-        padding: '20px'
+        padding: '20px',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        boxSizing: 'border-box'
       }}>
-        <div style={{ textAlign: 'right', marginBottom: '20px' }}>
-          {session ? (
-            <button onClick={() => setScreen('profile')} style={{ ...buttonStyle, background: '#6366f1', padding: '8px 16px', width: 'auto' }}>👤 My Profile</button>
-          ) : (
-            <button onClick={() => setScreen('auth')} style={{ ...buttonStyle, background: '#10b981', padding: '8px 16px', width: 'auto' }}>Login / Create Profile</button>
-          )}
-        </div>
+        <div>
+          <div style={{ textAlign: 'right', marginBottom: '20px' }}>
+            {session ? (
+              <button onClick={() => setScreen('profile')} style={{ ...buttonStyle, background: '#6366f1', padding: '8px 16px', width: 'auto' }}>👤 My Profile</button>
+            ) : (
+              <button onClick={() => setScreen('auth')} style={{ ...buttonStyle, background: '#10b981', padding: '8px 16px', width: 'auto' }}>Login / Create Profile</button>
+            )}
+          </div>
 
-        <div style={{ textAlign: 'center', marginBottom: '35px', color: 'white', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
-          <h1>🏡 USA Home Facts Public Domain</h1>
-          <p style={{ color: '#f1f5f9' }}>Crowdsourced Transparency Matrix (Like CARFAX for Homes)</p>
-        </div>
-        
-        <div style={{ ...cardStyle, backgroundColor: 'transparent', border: 'none', boxShadow: 'none' }}>
-          <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', color: '#ffffff', fontWeight: 'bold', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>Select State</label>
-          <select value={state} onChange={(e) => setState(e.target.value)} style={{ ...selectStyle, marginBottom: '15px', backgroundColor: '#ffffff', color: '#000000', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '10px', width: '100%', fontSize: '16px' }}>
-            <option value="">Select a State...</option>
-            {['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'].map(s => (
-              <option key={s} value={s} style={{color: 'black'}}>{s}</option>
-            ))}
-          </select>
+          <div style={{ textAlign: 'center', marginBottom: '35px', color: 'white', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
+            <h1>🏡 USA Home Facts Public Domain</h1>
+            <p style={{ color: '#f1f5f9' }}>Crowdsourced Transparency Matrix (Like CARFAX for Homes)</p>
+          </div>
+          
+          <div style={{ ...cardStyle, backgroundColor: 'transparent', border: 'none', boxShadow: 'none' }}>
+            <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', color: '#ffffff', fontWeight: 'bold', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>Select State</label>
+            <select value={state} onChange={(e) => setState(e.target.value)} style={{ ...selectStyle, marginBottom: '15px', backgroundColor: '#ffffff', color: '#000000', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '10px', width: '100%', fontSize: '16px' }}>
+              <option value="">Select a State...</option>
+              {['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'].map(s => (
+                <option key={s} value={s} style={{color: 'black'}}>{s}</option>
+              ))}
+            </select>
 
-          <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', color: '#ffffff', fontWeight: 'bold', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>Search Property History</label>
-          <input
-            placeholder="Enter 7 or 8 Digit MLS ID Code"
-            value={property}
-            onChange={(e) => setProperty(e.target.value.replace(/\D/g, ''))}
-            onKeyDown={async (e) => {
-              if (e.key === 'Enter') {
-                console.log("DEBUG: Enter key pressed. Property:", property, "State:", state);
+            <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', color: '#ffffff', fontWeight: 'bold', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>Type an MLS property number</label>
+            <input
+              placeholder="Enter 7 or 8 Digit MLS ID Code"
+              value={property}
+              onChange={(e) => setProperty(e.target.value.replace(/\D/g, ''))}
+              onKeyDown={async (e) => {
+                if (e.key === 'Enter') {
+                  console.log("DEBUG: Enter key pressed. Property:", property, "State:", state);
+                  if (!state) {
+                    alert("Please select a state first.");
+                    return;
+                  }
+                  if (!property) {
+                    alert("Please enter an MLS number.");
+                    return;
+                  }
+                  try {
+                    await loadPublicData(property, state);
+                  } catch (err) {
+                    console.log("No existing public records found, proceeding to dashboard cleanly.");
+                  }
+                  setScreen('dashboard');
+                }
+              }}
+              style={{ ...inputStyle, backgroundColor: '#ffffff', color: '#000000', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '10px', width: '100%', boxSizing: 'border-box', fontSize: '16px', marginBottom: '15px' }}
+            />
+
+            <button 
+              type="button"
+              onClick={async () => {
+                console.log("DEBUG: Search button clicked. Property:", property, "State:", state);
                 if (!state) {
                   alert("Please select a state first.");
                   return;
@@ -468,49 +522,39 @@ export default function App() {
                 }
                 try {
                   await loadPublicData(property, state);
-                  setScreen('dashboard');
                 } catch (err) {
-                  console.error("Search failed:", err);
-                  alert("Search failed. Check console for details.");
+                  console.log("No existing public records found, proceeding to dashboard cleanly.");
                 }
-              }
-            }}
-            style={{ ...inputStyle, backgroundColor: '#ffffff', color: '#000000', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '10px', width: '100%', boxSizing: 'border-box', fontSize: '16px', marginBottom: '15px' }}
-          />
-
-          <button 
-            type="button"
-            onClick={async () => {
-              console.log("DEBUG: Search button clicked. Property:", property, "State:", state);
-              if (!state) {
-                alert("Please select a state first.");
-                return;
-              }
-              if (!property) {
-                alert("Please enter an MLS number.");
-                return;
-              }
-              try {
-                await loadPublicData(property, state);
                 setScreen('dashboard'); 
-              } catch (err) {
-                console.error("Search failed:", err);
-                alert("Search failed: " + (err?.message || JSON.stringify(err)));
-              }
-            }}
-            style={{ 
-              ...buttonStyle, 
-              background: '#3b82f6',
-              cursor: 'pointer'
-            }}
+              }}
+              style={{ 
+                ...buttonStyle, 
+                background: '#3b82f6',
+                cursor: 'pointer'
+              }}
+            >
+              Search Public Opinions
+            </button>
+          </div>
+
+          {/* Generic Ad Space on Search Page */}
+          <div style={{ marginTop: '25px' }}>
+            <AdBanner client="ca-pub-XXXXXXXXXXXXXXXX" slot="1234567890" />
+          </div>
+        </div>
+
+        {/* Privacy Policy Footer Link */}
+        <div style={{ textAlign: 'center', padding: '20px' }}>
+          <button 
+            onClick={() => setScreen('privacy')} 
+            style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', textDecoration: 'underline', fontSize: '0.85rem', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}
           >
-            Search Public Opinions
+            Privacy Policy & Legal Terms
           </button>
         </div>
       </div>
     );
-  }
-  if (screen === 'auth') {
+  } else if (screen === 'auth') {
     content = (
       <div style={pageStyle}>
         <button 
@@ -688,7 +732,7 @@ export default function App() {
       <div style={{
         ...pageStyle,
         minHeight: '100vh',
-        background: 'linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4)), url("https://images.unsplash.com/photo-1449844908441-8829872d2607?auto=format&fit=crop&w=2000&q=80")',
+        background: 'linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4)), url("https://images.unsplash.com/photo-1449844908441-8829872d2607?auto=format&fit=crop&q=80&w=2000")',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundAttachment: 'fixed',
@@ -720,7 +764,7 @@ export default function App() {
           </div>
         ) : (
           <div style={{ ...cardStyle, backgroundColor: 'transparent', border: '1px solid #000000', textAlign: 'center', padding: '30px', marginBottom: '20px' }}>
-            <p style={{ margin: 0 }}>⚠️ No public data files submitted yet for this listing. Be the first to review this MLS!</p>
+            <p style={{ margin: 0 }}>⚠️ No public data files submitted for this listing. Be the first to review this MLS!</p>
           </div>
         )}
 
@@ -731,43 +775,6 @@ export default function App() {
           >
             ➕ Start Your own Walkthrough
           </button>
-        </div>
-
-        {/* Targeted Local Ads Section (Top 2 Weakest Categories) */}
-        <div style={{ ...cardStyle, backgroundColor: 'rgba(0, 0, 0, 0.6)', border: '1px solid #3b82f6', marginBottom: '20px', padding: '15px' }}>
-          <h4 style={{ color: 'white', marginTop: 0, marginBottom: '10px', fontSize: '1rem', textShadow: 'none' }}>
-            🛠️ Recommended Local Experts for Property Attention Areas ({state})
-          </h4>
-          <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
-            {getTopTwoWeakestCategories(publicReports).map((weakItem, index) => {
-              const adsForCategory = localAdInventory[state]?.[weakItem.category] || [];
-              const currentAd = adsForCategory[0];
-
-              return (
-                <div key={index} style={{ flex: 1, minWidth: '220px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '12px', textShadow: 'none' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', background: '#3b82f6', color: 'white', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>
-                      Priority #{index + 1}: {weakItem.category}
-                    </span>
-                  </div>
-
-                  {currentAd ? (
-                    <div>
-                      <h5 style={{ color: 'white', margin: '0 0 4px 0', fontSize: '0.95rem' }}>{currentAd.name}</h5>
-                      <p style={{ color: '#cbd5e1', fontSize: '0.8rem', margin: '0 0 8px 0' }}>{currentAd.adText}</p>
-                      <a href={currentAd.link} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontSize: '0.8rem', textDecoration: 'none', fontWeight: 'bold' }}>
-                        Contact → {currentAd.phone}
-                      </a>
-                    </div>
-                  ) : (
-                    <p style={{ color: '#94a3b8', fontSize: '0.8rem', margin: 0 }}>
-                      No local sponsors listed yet for {weakItem.category} in {state}.
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
         </div>
 
         <h3 style={{ borderBottom: '1px solid #000000', paddingBottom: '8px' }}>📜 Historical Report Logs Timeline</h3>
@@ -803,7 +810,6 @@ export default function App() {
       </div>
     );
   }
-
   if (screen === 'dimensions') {
     content = (
       <div style={{
@@ -914,15 +920,27 @@ export default function App() {
       const getGlobalRepairCost = () => {
         let globalMinCost = 0;
         let globalMaxCost = 0;
-        const resp = responses || {};
         
+        // Apply state economic multiplier index
+        const rawStateMultiplier = stateCostMultipliers[state?.toUpperCase()] || stateCostMultipliers.DEFAULT || 750;
+        const stateFactor = rawStateMultiplier / 750;
+
+        const resp = responses || {};
         Object.keys(costMatrix).forEach(id => {
           const itemScore = Number(resp[id] ?? 5);
           if (itemScore < 5) {
             const bounds = costMatrix[id];
             const scaleFactor = itemScore === 4 ? 0.15 : itemScore === 3 ? 0.40 : itemScore === 2 ? 0.75 : 1.0;
-            globalMinCost += (bounds.min * scaleFactor);
-            globalMaxCost += (bounds.max * scaleFactor);
+            
+            let sizeMultiplier = 1.0;
+            if (bounds.cat === 'Interior' || bounds.cat === 'Electrical' || bounds.cat === 'HVAC') {
+              sizeMultiplier = Number(beds) <= 2 ? 0.8 : Number(beds) === 3 ? 1.0 : Number(beds) === 4 ? 1.25 : 1.5;
+            } else if (bounds.cat === 'Plumbing' || bounds.cat === 'Bathroom') {
+              sizeMultiplier = Number(baths) <= 1 ? 0.7 : Number(baths) === 2 ? 1.0 : Number(baths) === 3 ? 1.3 : 1.6;
+            }
+
+            globalMinCost += (bounds.min * scaleFactor * sizeMultiplier * stateFactor);
+            globalMaxCost += (bounds.max * scaleFactor * sizeMultiplier * stateFactor);
           }
         });
         
@@ -1060,6 +1078,11 @@ export default function App() {
           );
         })}
 
+          {/* Generic Ad Space on Checklist View */}
+          <div style={{ margin: '25px 0' }}>
+            <AdBanner client="ca-pub-XXXXXXXXXXXXXXXX" slot="0987654321" />
+          </div>
+
           <div style={{ display: 'flex', marginTop: '20px' }}>
             <button onClick={() => setScreen('summary')} style={{ ...buttonStyle, background: '#6366f1', border: '1px solid #000000' }}>
               📊 View Your Breakdown Summary
@@ -1075,15 +1098,27 @@ export default function App() {
     const getGlobalRepairCost = () => {
       let globalMinCost = 0;
       let globalMaxCost = 0;
-      const resp = responses || {};
       
+      // Use your state multiplier index
+      const rawStateMultiplier = stateCostMultipliers[state?.toUpperCase()] || stateCostMultipliers.DEFAULT || 750;
+      const stateFactor = rawStateMultiplier / 750;
+
+      const resp = responses || {};
       Object.keys(costMatrix).forEach(id => {
         const itemScore = Number(resp[id] ?? 5);
         if (itemScore < 5) {
           const bounds = costMatrix[id];
           const scaleFactor = itemScore === 4 ? 0.15 : itemScore === 3 ? 0.40 : itemScore === 2 ? 0.75 : 1.0;
-          globalMinCost += (bounds.min * scaleFactor);
-          globalMaxCost += (bounds.max * scaleFactor);
+          
+          let sizeMultiplier = 1.0;
+          if (bounds.cat === 'Interior' || bounds.cat === 'Electrical' || bounds.cat === 'HVAC') {
+            sizeMultiplier = Number(beds) <= 2 ? 0.8 : Number(beds) === 3 ? 1.0 : Number(beds) === 4 ? 1.25 : 1.5;
+          } else if (bounds.cat === 'Plumbing' || bounds.cat === 'Bathroom') {
+            sizeMultiplier = Number(baths) <= 1 ? 0.7 : Number(baths) === 2 ? 1.0 : Number(baths) === 3 ? 1.3 : 1.6;
+          }
+
+          globalMinCost += (bounds.min * scaleFactor * sizeMultiplier * stateFactor);
+          globalMaxCost += (bounds.max * scaleFactor * sizeMultiplier * stateFactor);
         }
       });
       
@@ -1121,49 +1156,10 @@ export default function App() {
         <div style={{ ...cardStyle, background: 'rgba(15, 23, 42, 0.8)', border: '1px solid #000000', marginBottom: '20px' }}>
           <h3 style={{ color: 'white', marginBottom: '15px' }}>Inspection Overview</h3>
           <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.5' }}>
-            Review your scored categories and itemized notes below before saving or finalizing your report.
+            Review your scored categories and itemized notes below!
           </p>
         </div>
 
-        {/* Targeted Local Ads Section (Top 2 Weakest Categories for THIS Walkthrough) */}
-        <div style={{ ...cardStyle, backgroundColor: 'rgba(0, 0, 0, 0.6)', border: '1px solid #3b82f6', marginBottom: '20px', padding: '15px' }}>
-          <h4 style={{ color: 'white', marginTop: 0, marginBottom: '10px', fontSize: '1rem', textShadow: 'none' }}>
-            🛠️ Recommended Local Experts for Your Attention Areas ({state || 'Local'})
-          </h4>
-          <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
-            {getTopTwoWeakestCategories([{ responses }]).map((weakItem, index) => {
-              const adsForCategory = localAdInventory[state]?.[weakItem.category] || [];
-              const currentAd = adsForCategory[0];
-              // Fallback to format the ID cleanly if it uses underscores
-              const displayName = costMatrix[weakItem.category]?.label || weakItem.category.replace(/_/g, ' ');
-
-              return (
-                <div key={index} style={{ flex: 1, minWidth: '220px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '12px', textShadow: 'none' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', background: '#3b82f6', color: 'white', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>
-                      Priority #{index + 1}: {displayName}
-                    </span>
-                  </div>
-
-                  {currentAd ? (
-                    <div>
-                      <h5 style={{ color: 'white', margin: '0 0 4px 0', fontSize: '0.95rem' }}>{currentAd.name}</h5>
-                      <p style={{ color: '#cbd5e1', fontSize: '0.8rem', margin: '0 0 8px 0' }}>{currentAd.adText}</p>
-                      <a href={currentAd.link} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontSize: '0.8rem', textDecoration: 'none', fontWeight: 'bold' }}>
-                        Contact → {currentAd.phone}
-                      </a>
-                    </div>
-                  ) : (
-                    <p style={{ color: '#94a3b8', fontSize: '0.8rem', margin: 0 }}>
-                      No local sponsors listed yet for {displayName} in {state || 'this area'}.
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-  
         {categoriesData.map((cat) => {
           const score = getCategoryScore(cat.name);
           const catCosts = getCategoryRepairCost(cat.name);
