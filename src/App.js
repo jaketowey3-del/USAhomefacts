@@ -539,7 +539,7 @@ export default function App() {
 
           {/* Generic Ad Space on Search Page */}
           <div style={{ marginTop: '25px' }}>
-            <AdBanner client="ca-pub-XXXXXXXXXXXXXXXX" slot="1234567890" />
+            <AdBanner client="ca-pub-3596352344964274" slot="6854844031" />
           </div>
         </div>
 
@@ -1080,7 +1080,7 @@ export default function App() {
 
           {/* Generic Ad Space on Checklist View */}
           <div style={{ margin: '25px 0' }}>
-            <AdBanner client="ca-pub-XXXXXXXXXXXXXXXX" slot="0987654321" />
+            <AdBanner client="ca-pub-3596352344964274" slot="9289435689" />
           </div>
 
           <div style={{ display: 'flex', marginTop: '20px' }}>
