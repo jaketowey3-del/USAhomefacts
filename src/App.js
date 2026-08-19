@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import PropertySelector from './PropertySelector.js'; 
 import UserProfile from './UserProfile.js';           
-import { costMatrix, categoriesData } from './propertyData.js';
+import { costMatrix, categoriesData, stateCostMultipliers } from './propertyData.js';
 import { createClient } from '@supabase/supabase-js';
 import Auth from './Auth.js';
 import './style.css';
+import { localAdInventory, getTopTwoWeakestCategories } from './localAds.js';
 
 const supabase = createClient(
   'https://coxkznpuqtuweijetdja.supabase.co',
@@ -167,31 +168,37 @@ export default function App() {
   const isMlsValid = (property.length === 7 || property.length === 8) && state !== '';
   useEffect(() => { window.scrollTo(0, 0); }, [screen]);
 
-  const loadPublicData = async (mls) => {
+  const loadPublicData = async (mls, overrideState = null) => {
     if (loading) return;
-    console.log("DEBUG: loadPublicData was called with MLS:", mls);
+    
+    const activeState = overrideState || state;
+    console.log("DEBUG: loadPublicData called with MLS:", mls, "and State:", activeState);
   
-    if (!mls) {
-      console.log("DEBUG: MLS was empty, exiting function.");
+    if (!mls) return;
+    if (!activeState) {
+      alert("Please select a state first.");
       return;
     }
   
-    // Query your reports table directly using the mls_id column
+    // Query your reports table using the top-level state column
     const { data: inspections, error: inspError } = await supabase
       .from('reports')
       .select('*')
-      .eq('mls_id', mls);
+      .eq('mls_id', mls)
+      .ilike('state', activeState);
       
-    console.log("DEBUG: Inspections found in reports:", inspections);
+    console.log("DEBUG: Inspections found for state", activeState, ":", inspections);
 
     if (inspError) {
       console.error("DEBUG: Supabase Error Details:", inspError.message);
+      alert("Database error: " + inspError.message);
       return;
     }
 
     if (!inspections || inspections.length === 0) {
       setPublicReports([]);
       setCommunitySummary(null);
+      alert("No public records found for this MLS number in " + activeState);
       return;
     }
 
@@ -201,8 +208,12 @@ export default function App() {
     const matrixKeys = Object.keys(costMatrix);
     const maxPossibleScore = matrixKeys.length > 0 ? matrixKeys.length * 5 : 1;
 
+    // Apply state economic multiplier index
+    const rawStateMultiplier = stateCostMultipliers[activeState.toUpperCase()] || stateCostMultipliers.DEFAULT || 750;
+    const stateFactor = rawStateMultiplier / 750;
+    console.log("DEBUG: Active State:", activeState, "State Factor:", stateFactor);
+
     inspections.forEach(insp => {
-      // Handle responses whether they are stored nested or directly
       const resp = insp.property_data?.responses || insp.responses || {};
       let propScoreTotal = 0;
       
@@ -213,8 +224,8 @@ export default function App() {
           const bounds = costMatrix[id];
           if (bounds) {
             const scaleFactor = itemScore === 4 ? 0.15 : itemScore === 3 ? 0.40 : itemScore === 2 ? 0.75 : 1.0;
-            globalMinCost += (bounds.min * scaleFactor);
-            globalMaxCost += (bounds.max * scaleFactor);
+            globalMinCost += (bounds.min * scaleFactor * stateFactor);
+            globalMaxCost += (bounds.max * scaleFactor * stateFactor);
           }
         }
       });
@@ -322,6 +333,7 @@ export default function App() {
         {
           user_id: session.user.id,
           mls_id: property,
+          state: state, // <-- Saves directly into your new Supabase state column
           property_data: reportData
         }
       ]);
@@ -444,12 +456,22 @@ export default function App() {
             value={property}
             onChange={(e) => setProperty(e.target.value.replace(/\D/g, ''))}
             onKeyDown={async (e) => {
-              if (e.key === 'Enter' && isMlsValid) {
+              if (e.key === 'Enter') {
+                console.log("DEBUG: Enter key pressed. Property:", property, "State:", state);
+                if (!state) {
+                  alert("Please select a state first.");
+                  return;
+                }
+                if (!property) {
+                  alert("Please enter an MLS number.");
+                  return;
+                }
                 try {
-                  await loadPublicData(property);
+                  await loadPublicData(property, state);
                   setScreen('dashboard');
                 } catch (err) {
-                  console.error("Search failed", err);
+                  console.error("Search failed:", err);
+                  alert("Search failed. Check console for details.");
                 }
               }
             }}
@@ -457,19 +479,29 @@ export default function App() {
           />
 
           <button 
+            type="button"
             onClick={async () => {
+              console.log("DEBUG: Search button clicked. Property:", property, "State:", state);
+              if (!state) {
+                alert("Please select a state first.");
+                return;
+              }
+              if (!property) {
+                alert("Please enter an MLS number.");
+                return;
+              }
               try {
-                await loadPublicData(property);
+                await loadPublicData(property, state);
                 setScreen('dashboard'); 
               } catch (err) {
-                console.error("Search failed", err);
+                console.error("Search failed:", err);
+                alert("Search failed: " + (err?.message || JSON.stringify(err)));
               }
             }}
-            disabled={!isMlsValid}
             style={{ 
               ...buttonStyle, 
-              background: isMlsValid ? '#3b82f6' : '#94a3b8',
-              cursor: isMlsValid ? 'pointer' : 'not-allowed'
+              background: '#3b82f6',
+              cursor: 'pointer'
             }}
           >
             Search Public Opinions
@@ -499,13 +531,20 @@ export default function App() {
   }
   if (screen === 'onboarding') {
     content = (
-      <div style={{ ...pageStyle, maxWidth: '600px', margin: '0 auto' }}>
+      <div style={{ ...pageStyle, maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
         <h2>Welcome to USA Home Facts</h2>
         <div style={cardStyle}>
           {onboardingStep === 1 && (
             <div>
               <h3>Let's personalize your experience</h3>
               
+              {/* Email verification reminder */}
+              <div style={{ background: '#1e293b', border: '1px solid #3b82f6', padding: '12px', borderRadius: '6px', marginBottom: '15px' }}>
+                <p style={{ color: '#38bdf8', fontSize: '0.85rem', margin: 0 }}>
+                  ✉️ <strong>Check your email!</strong> Please make sure your email address is verified before finishing profile setup.
+                </p>
+              </div>
+
               <input
                 type="text"
                 placeholder="Full Name"
@@ -539,6 +578,27 @@ export default function App() {
                 onClick={() => saveOnboarding(profileData)}
               >
                 Complete Setup
+              </button>
+
+              {/* Back to Login Button */}
+              <button 
+                type="button"
+                onClick={() => {
+                  supabase.auth.signOut();
+                  setScreen('auth');
+                }} 
+                style={{ 
+                  background: 'transparent', 
+                  color: '#94a3b8', 
+                  border: 'none', 
+                  marginTop: '15px', 
+                  width: '100%',
+                  cursor: 'pointer', 
+                  fontSize: '0.85rem',
+                  textDecoration: 'underline'
+                }}
+              >
+                ← Back to Login / Sign In
               </button>
             </div>
           )}
@@ -581,8 +641,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* Past Walkthroughs Section */}
-        <div style={{ ...cardStyle, marginTop: '20px' }}>
+       {/* Past Walkthroughs Section */}
+       <div style={{ ...cardStyle, marginTop: '20px' }}>
           <h3 style={{ color: 'white', marginBottom: '15px' }}>📋 Your Past Walkthroughs</h3>
           {userInspections.length === 0 ? (
             <p style={{ color: '#94a3b8', fontSize: '14px' }}>No walkthroughs saved under your profile yet.</p>
@@ -593,6 +653,7 @@ export default function App() {
                   key={insp.id} 
                   onClick={() => {
                     setProperty(insp.mls_id);
+                    setState(insp.state || ''); // Also populates state when clicking to view!
                     setResponses(insp.property_data?.responses || insp.responses || {});
                     setNotes(insp.property_data?.notes || insp.notes || {});
                     setScreen('summary');
@@ -609,7 +670,7 @@ export default function App() {
                   onMouseLeave={(e) => e.currentTarget.style.borderColor = '#334155'}
                 >
                   <p style={{ color: 'white', fontWeight: 'bold', margin: '0 0 5px 0' }}>
-                    MLS ID: {insp.mls_id || 'N/A'} (Click to view)
+                    MLS ID: {insp.mls_id || 'N/A'} {insp.state ? `— State: ${insp.state}` : ''} (Click to view)
                   </p>
                   <p style={{ color: '#94a3b8', fontSize: '13px', margin: '0' }}>
                     Logged on: {new Date(insp.saved_at || insp.created_at).toLocaleDateString()}
@@ -670,6 +731,43 @@ export default function App() {
           >
             ➕ Start Your own Walkthrough
           </button>
+        </div>
+
+        {/* Targeted Local Ads Section (Top 2 Weakest Categories) */}
+        <div style={{ ...cardStyle, backgroundColor: 'rgba(0, 0, 0, 0.6)', border: '1px solid #3b82f6', marginBottom: '20px', padding: '15px' }}>
+          <h4 style={{ color: 'white', marginTop: 0, marginBottom: '10px', fontSize: '1rem', textShadow: 'none' }}>
+            🛠️ Recommended Local Experts for Property Attention Areas ({state})
+          </h4>
+          <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
+            {getTopTwoWeakestCategories(publicReports).map((weakItem, index) => {
+              const adsForCategory = localAdInventory[state]?.[weakItem.category] || [];
+              const currentAd = adsForCategory[0];
+
+              return (
+                <div key={index} style={{ flex: 1, minWidth: '220px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '12px', textShadow: 'none' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', background: '#3b82f6', color: 'white', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>
+                      Priority #{index + 1}: {weakItem.category}
+                    </span>
+                  </div>
+
+                  {currentAd ? (
+                    <div>
+                      <h5 style={{ color: 'white', margin: '0 0 4px 0', fontSize: '0.95rem' }}>{currentAd.name}</h5>
+                      <p style={{ color: '#cbd5e1', fontSize: '0.8rem', margin: '0 0 8px 0' }}>{currentAd.adText}</p>
+                      <a href={currentAd.link} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontSize: '0.8rem', textDecoration: 'none', fontWeight: 'bold' }}>
+                        Contact → {currentAd.phone}
+                      </a>
+                    </div>
+                  ) : (
+                    <p style={{ color: '#94a3b8', fontSize: '0.8rem', margin: 0 }}>
+                      No local sponsors listed yet for {weakItem.category} in {state}.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <h3 style={{ borderBottom: '1px solid #000000', paddingBottom: '8px' }}>📜 Historical Report Logs Timeline</h3>
@@ -1025,6 +1123,45 @@ export default function App() {
           <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.5' }}>
             Review your scored categories and itemized notes below before saving or finalizing your report.
           </p>
+        </div>
+
+        {/* Targeted Local Ads Section (Top 2 Weakest Categories for THIS Walkthrough) */}
+        <div style={{ ...cardStyle, backgroundColor: 'rgba(0, 0, 0, 0.6)', border: '1px solid #3b82f6', marginBottom: '20px', padding: '15px' }}>
+          <h4 style={{ color: 'white', marginTop: 0, marginBottom: '10px', fontSize: '1rem', textShadow: 'none' }}>
+            🛠️ Recommended Local Experts for Your Attention Areas ({state || 'Local'})
+          </h4>
+          <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
+            {getTopTwoWeakestCategories([{ responses }]).map((weakItem, index) => {
+              const adsForCategory = localAdInventory[state]?.[weakItem.category] || [];
+              const currentAd = adsForCategory[0];
+              // Fallback to format the ID cleanly if it uses underscores
+              const displayName = costMatrix[weakItem.category]?.label || weakItem.category.replace(/_/g, ' ');
+
+              return (
+                <div key={index} style={{ flex: 1, minWidth: '220px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '12px', textShadow: 'none' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', background: '#3b82f6', color: 'white', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>
+                      Priority #{index + 1}: {displayName}
+                    </span>
+                  </div>
+
+                  {currentAd ? (
+                    <div>
+                      <h5 style={{ color: 'white', margin: '0 0 4px 0', fontSize: '0.95rem' }}>{currentAd.name}</h5>
+                      <p style={{ color: '#cbd5e1', fontSize: '0.8rem', margin: '0 0 8px 0' }}>{currentAd.adText}</p>
+                      <a href={currentAd.link} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontSize: '0.8rem', textDecoration: 'none', fontWeight: 'bold' }}>
+                        Contact → {currentAd.phone}
+                      </a>
+                    </div>
+                  ) : (
+                    <p style={{ color: '#94a3b8', fontSize: '0.8rem', margin: 0 }}>
+                      No local sponsors listed yet for {displayName} in {state || 'this area'}.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
   
         {categoriesData.map((cat) => {
