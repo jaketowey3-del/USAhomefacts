@@ -68,6 +68,10 @@ export default function App() {
   const [communitySummary, setCommunitySummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [userInspections, setUserInspections] = useState([]);
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -465,9 +469,23 @@ export default function App() {
         <div>
           <div style={{ textAlign: 'right', marginBottom: '20px' }}>
             {session ? (
-              <button onClick={() => setScreen('profile')} style={{ ...buttonStyle, background: '#6366f1', padding: '8px 16px', width: 'auto' }}>👤 My Profile</button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button onClick={() => setScreen('profile')} style={{ ...buttonStyle, background: '#6366f1', padding: '8px 16px', width: 'auto' }}>👤 My Profile</button>
+                <button 
+                  onClick={async () => {
+                    await supabase.auth.signOut();
+                    setScreen('home');
+                  }} 
+                  style={{ ...buttonStyle, background: '#ef4444', padding: '8px 16px', width: 'auto' }}
+                >
+                  Sign Out
+                </button>
+              </div>
             ) : (
-              <button onClick={() => setScreen('auth')} style={{ ...buttonStyle, background: '#10b981', padding: '8px 16px', width: 'auto' }}>Login / Create Profile</button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button onClick={() => setScreen('auth')} style={{ ...buttonStyle, background: '#3b82f6', padding: '8px 16px', width: 'auto' }}>Sign In</button>
+                <button onClick={() => setScreen('register')} style={{ ...buttonStyle, background: '#10b981', padding: '8px 16px', width: 'auto' }}>Create Account</button>
+              </div>
             )}
           </div>
 
@@ -560,20 +578,137 @@ export default function App() {
     );
   } else if (screen === 'auth') {
     content = (
-      <div style={pageStyle}>
+      <div style={{ ...pageStyle, maxWidth: '500px', margin: '0 auto', padding: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100vh' }}>
         <button 
           onClick={() => setScreen('home')} 
-          style={{ ...buttonStyle, background: '#475569', marginBottom: '20px' }}
+          style={{ ...buttonStyle, background: '#475569', marginBottom: '20px', width: 'auto' }}
         >
           ← Back to Search
+        </button>
+        
+        <div style={cardStyle}>
+          <h2>Sign In to Your Account</h2>
+          <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '20px' }}>
+            Welcome back! Enter your credentials to sign in.
+          </p>
+
+          <input
+            type="email"
+            placeholder="Email Address"
+            style={{ ...inputStyle, marginBottom: '15px', background: '#ffffff', color: '#000000' }}
+            value={email || ''}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+
+          <input
+            type="password"
+            placeholder="Password"
+            style={{ ...inputStyle, marginBottom: '20px', background: '#ffffff', color: '#000000' }}
+            value={password || ''}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+
+          <button 
+            style={{ ...buttonStyle, background: '#3b82f6', width: '100%', cursor: 'pointer' }} 
+            onClick={async () => {
+              if (!email || !password) {
+                alert("Please enter both your email and password.");
+                return;
+              }
+              try {
+                const { data, error } = await supabase.auth.signInWithPassword({
+                  email,
+                  password,
+                });
+                if (error) throw error;
+                
+                // Successfully signed in! Head back to home/dashboard
+                setScreen('home');
+              } catch (err) {
+                alert(err.message);
+              }
+            }}
+          >
+            Sign In
           </button>
-          <Auth 
-          supabaseClient={supabase} 
-          setLoading={setLoading}
-          loading={loading}
-          onSignUpSuccess={() => setScreen('onboarding')}
-          onSignInSuccess={() => setScreen('home')}
-        />
+
+          <div style={{ textAlign: 'center', marginTop: '20px' }}>
+            <button 
+              type="button"
+              onClick={() => setScreen('register')} 
+              style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', textDecoration: 'underline', fontSize: '0.9rem' }}
+            >
+              Don't have an account? Create one here
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  } else if (screen === 'register') {
+    content = (
+      <div style={{ ...pageStyle, maxWidth: '500px', margin: '0 auto', padding: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100vh' }}>
+        <button 
+          onClick={() => setScreen('home')} 
+          style={{ ...buttonStyle, background: '#475569', marginBottom: '20px', width: 'auto' }}
+        >
+          ← Back to Search
+        </button>
+        
+        <div style={cardStyle}>
+          <h2>Create Your Account</h2>
+          <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '20px' }}>
+            Enter your email and create a password to get started.
+          </p>
+
+          <input
+            type="email"
+            placeholder="Email Address"
+            style={{ ...inputStyle, marginBottom: '15px', background: '#ffffff', color: '#000000' }}
+            value={regEmail || ''}
+            onChange={(e) => setRegEmail(e.target.value)}
+          />
+
+          <input
+            type="password"
+            placeholder="Create Password"
+            style={{ ...inputStyle, marginBottom: '20px', background: '#ffffff', color: '#000000' }}
+            value={regPassword || ''}
+            onChange={(e) => setRegPassword(e.target.value)}
+          />
+
+          <button 
+            style={{ ...buttonStyle, background: '#10b981', width: '100%', cursor: 'pointer' }} 
+            onClick={async () => {
+              if (!regEmail || !regPassword) {
+                alert("Please enter both an email and a password.");
+                return;
+              }
+              try {
+                const { data, error } = await supabase.auth.signUp({
+                  email: regEmail,
+                  password: regPassword,
+                });
+                if (error) throw error;
+                
+                // Successfully signed up! Send straight to onboarding
+                setScreen('onboarding');
+              } catch (err) {
+                alert(err.message);
+              }
+            }}
+          >
+            Continue to Onboarding
+          </button>
+
+          <div style={{ textAlign: 'center', marginTop: '20px' }}>
+            <button 
+              onClick={() => setScreen('auth')} 
+              style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', textDecoration: 'underline', fontSize: '0.9rem' }}
+            >
+              Already have an account? Sign In here
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -729,92 +864,101 @@ export default function App() {
           )}
         </div>
       </div>
-    );
-  }
-  if (screen === 'dashboard') {
-    content = (
-      <div style={{
-        ...pageStyle,
-        minHeight: '100vh',
-        background: 'linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4)), url("https://images.unsplash.com/photo-1449844908441-8829872d2607?auto=format&fit=crop&q=80&w=2000")',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed',
-        padding: '20px',
-        color: '#ffffff',
-        textShadow: '0 0 2px #000000, 0 0 2px #000000, 0 0 2px #000000, 0 0 2px #000000'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <div>
-            <h2 style={{ margin: '0 0 5px 0' }}>📋 Public Opinion on MLS Properties</h2>
-            <p style={{ fontWeight: 'bold', margin: 0 }}>MLS ID Record Lookup: # {property}</p>
-          </div>
-          <button 
-            style={{ ...buttonStyle, width: 'auto', marginTop: 0, background: '#475569', border: '1px solid #000000' }} 
-            onClick={() => setScreen('home')}
-          >
-            Back to MLS search
-          </button>
+);
+}
+if (screen === 'dashboard') {
+  content = (
+    <div style={{
+      ...pageStyle,
+      minHeight: '100vh',
+      background: 'linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4)), url("https://images.unsplash.com/photo-1449844908441-8829872d2607?auto=format&fit=crop&q=80&w=2000")',
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundAttachment: 'fixed',
+      padding: '20px',
+      color: '#ffffff',
+      textShadow: '0 0 2px #000000, 0 0 2px #000000, 0 0 2px #000000, 0 0 2px #000000'
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <div>
+          <h2 style={{ margin: '0 0 5px 0' }}>📋 Public Opinion on MLS Properties</h2>
+          <p style={{ fontWeight: 'bold', margin: 0 }}>MLS ID Record Lookup: # {property}</p>
         </div>
-
-        {communitySummary ? (
-          <div style={{ ...cardStyle, backgroundColor: 'transparent', border: '1px solid #000000', boxShadow: 'none', textAlign: 'center', padding: '25px', marginBottom: '20px' }}>
-            <div style={{ textTransform: 'uppercase', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px' }}>Community Facts Profile</div>
-            <div style={{ fontSize: '3rem', fontWeight: 'bold', margin: '10px 0', color: '#ffffff' }}>{communitySummary.avgScore}%</div>
-            <div style={{ fontSize: '15px' }}>Based on <strong>{communitySummary.totalReviews} public user reports</strong></div>
-            <div style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid #000000', fontSize: '28px', color: '#ff3366', fontWeight: 'bold' }}>
-              Average property Repair/ update Liabilities Estimate: <br /><strong>${communitySummary.estimatedMarketRepairsMin.toLocaleString()} - ${communitySummary.estimatedMarketRepairsMax.toLocaleString()}</strong>
-            </div>
-          </div>
-        ) : (
-          <div style={{ ...cardStyle, backgroundColor: 'transparent', border: '1px solid #000000', textAlign: 'center', padding: '30px', marginBottom: '20px' }}>
-            <p style={{ margin: 0 }}>⚠️ No public data files submitted for this listing. Be the first to review this MLS!</p>
-          </div>
-        )}
-
-        <div style={{ margin: '20px 0', textAlign: 'center' }}>
-          <button 
-            onClick={() => { setResponses({}); setNotes({}); setScreen('dimensions'); }} 
-            style={{ ...buttonStyle, background: '#22c55e', marginTop: 0, width: 'auto', border: '1px solid #000000' }}
-          >
-            ➕ Start Your own Walkthrough
-          </button>
-        </div>
-
-        <h3 style={{ borderBottom: '1px solid #000000', paddingBottom: '8px' }}>📜 Historical Report Logs Timeline</h3>
-        {publicReports.length === 0 ? (
-          <p style={{ fontStyle: 'italic', fontWeight: 'bold' }}>Timeline unpopulated.</p>
-        ) : (
-          [...publicReports].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).map((report, idx) => {
-            const dateStr = report.created_at ? new Date(report.created_at).toLocaleDateString() : 'N/A';
-            const propData = report.property_data || {};
-            const rNotes = propData.notes || report.notes || {};
-            const rResp = propData.responses || report.responses || {};
-            let defectCount = 0;
-            Object.keys(rResp).forEach(k => { if (Number(rResp[k]) <= 4) defectCount++; });
-
-            return (
-              <div key={report.id} style={{ ...cardStyle, backgroundColor: 'transparent', border: '1px solid #000000', borderLeft: '4px solid #000000', marginBottom: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '8px' }}>
-                  <span>User Report #{publicReports.length - idx}</span><span>Logged: {dateStr}</span>
-                </div>
-                <div style={{ fontSize: '14px', fontWeight: '500' }}>⚠️ Flags Sighted: <span style={{ fontWeight: 'bold' }}>{defectCount} property areas noted</span></div>
-                {Object.keys(rNotes).some(k => rNotes[k].trim()) && (
-                  <div style={{ marginTop: '10px', padding: '8px', backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: '6px', fontSize: '13px', border: '1px solid #000000' }}>
-                    <span style={{ fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Inspector Observation Remarks:</span>
-                    {Object.keys(rNotes).filter(k => rNotes[k].trim()).map(k => (
-                      <div key={k} style={{ marginBottom: '4px' }}>• <strong>{costMatrix[k]?.label || 'Item'}:</strong> "{rNotes[k]}"</div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
+        <button 
+          style={{ ...buttonStyle, width: 'auto', marginTop: 0, background: '#475569', border: '1px solid #000000' }} 
+          onClick={() => setScreen('home')}
+        >
+          Back to MLS search
+        </button>
       </div>
-    );
-  }
-  if (screen === 'dimensions') {
+
+      {communitySummary ? (
+        <div style={{ ...cardStyle, backgroundColor: 'transparent', border: '1px solid #000000', boxShadow: 'none', textAlign: 'center', padding: '25px', marginBottom: '20px' }}>
+          <div style={{ textTransform: 'uppercase', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px' }}>Community Facts Profile</div>
+          <div style={{ fontSize: '3rem', fontWeight: 'bold', margin: '10px 0', color: '#ffffff' }}>{communitySummary.avgScore}%</div>
+          <div style={{ fontSize: '15px' }}>Based on <strong>{communitySummary.totalReviews} public user reports</strong></div>
+          <div style={{ marginTop: '15px', paddingTop: '15px', borderTop: '1px solid #000000', fontSize: '28px', color: '#ff3366', fontWeight: 'bold' }}>
+            Average property Repair/ update Liabilities Estimate: <br /><strong>${communitySummary.estimatedMarketRepairsMin.toLocaleString()} - ${communitySummary.estimatedMarketRepairsMax.toLocaleString()}</strong>
+          </div>
+        </div>
+      ) : (
+        <div style={{ ...cardStyle, backgroundColor: 'transparent', border: '1px solid #000000', textAlign: 'center', padding: '30px', marginBottom: '20px' }}>
+          <p style={{ margin: 0 }}>⚠️ No public data files submitted for this listing. Be the first to review this MLS!</p>
+        </div>
+      )}
+
+      <div style={{ margin: '20px 0', textAlign: 'center' }}>
+        <button 
+          onClick={() => { 
+            if (!session) {
+              alert("Please sign in or create an account to start your own walkthrough checklist.");
+              setScreen('auth');
+              return;
+            }
+            setResponses({}); 
+            setNotes({}); 
+            setScreen('dimensions'); 
+          }} 
+          style={{ ...buttonStyle, background: '#22c55e', marginTop: 0, width: 'auto', border: '1px solid #000000' }}
+        >
+          ➕ Start Your own Walkthrough
+        </button>
+      </div>
+
+      <h3 style={{ borderBottom: '1px solid #000000', paddingBottom: '8px' }}>📜 Historical Report Logs Timeline</h3>
+      {publicReports.length === 0 ? (
+        <p style={{ fontStyle: 'italic', fontWeight: 'bold' }}>Timeline unpopulated.</p>
+      ) : (
+        [...publicReports].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).map((report, idx) => {
+          const dateStr = report.created_at ? new Date(report.created_at).toLocaleDateString() : 'N/A';
+          const propData = report.property_data || {};
+          const rNotes = propData.notes || report.notes || {};
+          const rResp = propData.responses || report.responses || {};
+          let defectCount = 0;
+          Object.keys(rResp).forEach(k => { if (Number(rResp[k]) <= 4) defectCount++; });
+
+          return (
+            <div key={report.id} style={{ ...cardStyle, backgroundColor: 'transparent', border: '1px solid #000000', borderLeft: '4px solid #000000', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '8px' }}>
+                <span>User Report #{publicReports.length - idx}</span><span>Logged: {dateStr}</span>
+              </div>
+              <div style={{ fontSize: '14px', fontWeight: '500' }}>⚠️ Flags Sighted: <span style={{ fontWeight: 'bold' }}>{defectCount} property areas noted</span></div>
+              {Object.keys(rNotes).some(k => rNotes[k].trim()) && (
+                <div style={{ marginTop: '10px', padding: '8px', backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: '6px', fontSize: '13px', border: '1px solid #000000' }}>
+                  <span style={{ fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Inspector Observation Remarks:</span>
+                  {Object.keys(rNotes).filter(k => rNotes[k].trim()).map(k => (
+                    <div key={k} style={{ marginBottom: '4px' }}>• <strong>{costMatrix[k]?.label || 'Item'}:</strong> "{rNotes[k]}"</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+if (screen === 'dimensions') {
     content = (
       <div style={{
         ...pageStyle,
