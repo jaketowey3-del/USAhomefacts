@@ -72,6 +72,8 @@ export default function App() {
   const [regPassword, setRegPassword] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [propertyAddress, setPropertyAddress] = useState('');
+  const [walkthroughStartTime, setWalkthroughStartTime] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -125,7 +127,6 @@ export default function App() {
         getUserProfile(session.user.id);
       } else {
         setLoading(false);
-        setScreen('auth');
       }
     });
 
@@ -134,6 +135,122 @@ export default function App() {
     };
   }, []);
 
+  const cleanAddress = (rawText) => {
+    if (!rawText) return "";
+
+    let parsed = rawText;
+
+    if (typeof rawText === 'string' && rawText.trim().startsWith('{')) {
+      try {
+        parsed = JSON.parse(rawText);
+      } catch (e) {
+        console.error("Failed to parse address JSON:", e);
+      }
+    }
+
+    if (typeof parsed === 'object' && parsed !== null) {
+      // Grab whichever keys are present in the object dynamically
+      const street = parsed.streetAddress || parsed.address || parsed.street || parsed.line1 || '';
+      const city = parsed.city || '';
+      const state = parsed.state || parsed.stateOrProvince || 'WA';
+      const zip = parsed.zipcode || parsed.zip || parsed.postalCode || '';
+      
+      const cityStateZip = [city, state, zip].filter(Boolean).join(' ');
+      const combined = [street, cityStateZip].filter(Boolean).join(', ');
+      
+      if (combined) return combined;
+      
+      // Ultimate fallback if keys don't match: turn the object into a clean readable string
+      return Object.values(parsed).filter(Boolean).join(', ');
+    }
+
+    return String(rawText).replace(/["']/g, "").trim();
+  };
+
+  const getDistanceFromLatLonInFeet = (lat1, lon1, lat2, lon2) => {
+    const R = 3959; // Radius of the earth in miles
+    const dLat = deg2rad(lat2 - lat1);
+    const dLon = deg2rad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const d = R * c; // Distance in miles
+    const feet = d * 5280; // Convert miles to feet
+    return feet;
+  };
+  
+  const deg2rad = (deg) => {
+    return deg * (Math.PI / 180);
+  };
+  const fetchPropertyFromMLS = async (mlsNumber, targetState) => {
+    try {
+      console.log("Querying Zillow search/bymls for:", mlsNumber);
+      
+      const url = new URL("https://zillow.realtyapi.io/search/bymls");
+      url.searchParams.append("mlsid", mlsNumber);
+      url.searchParams.append("listingStatus", "For_Sale");
+      
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json',
+          'x-realtyapi-key': 'rt_PBK6tCf2hX9t5nWXRaR1KiO8'
+        }
+      });
+      
+      const data = await response.json();
+      console.log("MLS Search API Full Response:", data);
+      
+      const item = data.searchResult || data;
+      let rawAddress = item.address || item.propertyAddress || item.formatted_address;
+      let lat = item.latitude || null;
+      let lon = item.longitude || null;
+
+      // REVERSE LOOKUP FAIL-SAFE: If we got coordinates but no text address, 
+      // query the coordinates back to get the physical street name.
+      if (!rawAddress && lat && lon) {
+        console.log(`Resolving coordinates (${lat}, ${lon}) to physical address...`);
+        try {
+          const revResponse = await fetch(`https://zillow.realtyapi.io/search/bycoordinates?latitude=${lat}&longitude=${lon}`, {
+            method: 'GET',
+            headers: {
+              'accept': 'application/json',
+              'x-realtyapi-key': 'rt_PBK6tCf2hX9t5nWXRaR1KiO8'
+            }
+          });
+          const revData = await revResponse.json();
+          rawAddress = revData.address || revData.formatted_address || revData.searchResult?.address;
+        } catch (revErr) {
+          console.error("Coordinate reverse-lookup failed:", revErr);
+        }
+      }
+
+      let verifiedAddress = cleanAddress(rawAddress);
+
+      if (response.ok && verifiedAddress) {
+        return {
+          address: verifiedAddress,
+          latitude: lat,
+          longitude: lon
+        };
+      }
+      
+      return {
+        address: `MLS #${mlsNumber}, ${(targetState || "WA").toUpperCase()}`,
+        latitude: lat || 47.4578,
+        longitude: lon || -122.6453
+      };
+    } catch (err) {
+      console.error("MLS fetch error:", err);
+      return {
+        address: `MLS #${mlsNumber}, ${targetState || "WA"}`,
+        latitude: 47.4578,
+        longitude: -122.6453
+      };
+    }
+  };
   const getUserProfile = async (user) => {
     console.log("getUserProfile called with:", user);
     
@@ -149,7 +266,6 @@ export default function App() {
       setLoading(false);
       return null;
     }
-
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -208,7 +324,20 @@ export default function App() {
       return;
     }
   
-    // Query your reports table using the top-level state column
+    // 1. Fetch the Property record to get the verified address
+    const { data: propData } = await supabase
+      .from('Properties')
+      .select('address')
+      .eq('mls_number', mls)
+      .maybeSingle();
+
+    if (propData?.address) {
+      setPropertyAddress(propData.address);
+    } else {
+      setPropertyAddress("Address not available");
+    }
+
+    // 2. Query your reports table using the top-level state column
     const { data: inspections, error: inspError } = await supabase
       .from('reports')
       .select('*')
@@ -226,7 +355,6 @@ export default function App() {
     if (!inspections || inspections.length === 0) {
       setPublicReports([]);
       setCommunitySummary(null);
-      // alert("No public records found for this MLS number in " + activeState);
       return;
     }
 
@@ -271,11 +399,31 @@ export default function App() {
       estimatedMarketRepairsMax: Math.round(globalMaxCost / inspections.length)
     });
   };
-
   const saveInspection = async () => {
-    if (loading) return;
-    if (!isMlsValid) return alert('Invalid MLS Format');
+    console.log("🚀 saveInspection called!");
+    console.log("Current MLS state:", property, state);
+
+    if (loading) {
+      console.log("Halted: loading is true");
+      return;
+    }
+    if (!isMlsValid) {
+      console.log("Halted: invalid MLS format");
+      return alert('Invalid MLS Format');
+    }
+
+    // 12-Hour Window Check (12 hours * 60 minutes * 60 seconds * 1000 ms)
+    const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+    if (walkthroughStartTime && (Date.now() - walkthroughStartTime > TWELVE_HOURS_MS)) {
+      alert("Session Expired: More than 12 hours have passed since you verified your presence on-site. Please re-verify at the property.");
+      setScreen('dashboard');
+      return;
+    }
+
     try {
+      // 1. Fetch live property details from RealtyAPI using the MLS and state
+      const propertyDetails = await fetchPropertyFromMLS(property, state);
+
       let { data: prop, error: propError } = await supabase
         .from('Properties')
         .select('*')
@@ -285,9 +433,16 @@ export default function App() {
       if (propError) throw propError;
 
       if (!prop) { 
+        // 2. Insert the property along with the fetched address and coordinates
         const { data: newP } = await supabase
           .from('Properties')
-          .insert([{ mls_number: property, state: state }])
+          .insert([{ 
+            mls_number: property, 
+            state: state,
+            address: propertyDetails?.address || null,
+            latitude: propertyDetails?.latitude || null,
+            longitude: propertyDetails?.longitude || null
+          }])
           .select(); 
         
         if (!newP || newP.length === 0) {
@@ -299,6 +454,18 @@ export default function App() {
           prop = fallbackFetch;
         } else {
           prop = newP[0];
+        }
+      } else {
+        // Optional: Update existing property row if address/coords were missing before
+        if (!prop.address && propertyDetails?.address) {
+          await supabase
+            .from('Properties')
+            .update({ 
+              address: propertyDetails.address,
+              latitude: propertyDetails.latitude,
+              longitude: propertyDetails.longitude
+            })
+            .eq('id', prop.id);
         }
       }
 
@@ -325,6 +492,7 @@ export default function App() {
       setResponses({});
       setNotes({});
       setPhotos({});
+      setWalkthroughStartTime(null); // Reset timer on successful save
     } catch (error) {
       console.error('Supabase Error:', error.message);
       alert(`Pipeline error: ${error.message}`);
@@ -452,6 +620,80 @@ export default function App() {
       </div>
     );
   } else if (screen === 'home') {
+
+    // 1. Distance helper function (place this inside your component scope or outside the render loop)
+    const calculateDistanceInFeet = (lat1, lon1, lat2, lon2) => {
+      const R = 3958.8; // Earth's radius in miles
+      const dLat = (lat2 - lat1) * (Math.PI / 180);
+      const dLon = (lon2 - lon1) * (Math.PI / 180);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c * 5280; // Distance in feet
+    };
+
+    // 2. Reusable validation & navigation function for the geofence check
+    const handleGeofenceAndSearch = async () => {
+      if (!state) {
+        alert("Please select a state first.");
+        return;
+      }
+      if (!property) {
+        alert("Please enter an MLS number.");
+        return;
+      }
+
+      console.log("DEBUG: Running geofence check for Property:", property, "State:", state);
+
+      try {
+        // A. Load public data first to fetch property details / coordinates 
+        // (Ensure loadPublicData returns or populates your target property's latitude and longitude)
+        const propertyData = await loadPublicData(property, state);
+        
+        // *Note: Adjust this depending on how loadPublicData stores the retrieved coordinates, 
+        // e.g., propertyData?.lat or a state variable like currentPropertyLat*
+        const targetLat = propertyData?.lat || 47.4412; // Fallback example coordinate
+        const targetLon = propertyData?.lon || -122.7985;
+
+        // B. Check browser geolocation
+        if (!navigator.geolocation) {
+          alert("Geolocation is not supported by your browser.");
+          return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const userLat = position.coords.latitude;
+            const userLon = position.coords.longitude;
+
+            const distance = calculateDistanceInFeet(userLat, userLon, targetLat, targetLon);
+            console.log(`Geofence Check: User is ${Math.round(distance)} ft away from target property.`);
+
+            // C. Enforce the 1,000-foot limit
+            if (distance > 1000) {
+              alert(`Geofence Blocked: You are ${Math.round(distance)} feet away from the property. You must be within 1,000 ft to access the walkthrough.`);
+              return; // Stop here, do not navigate to dashboard
+            }
+
+            // D. Passed! Proceed to dashboard
+            alert("Geofence passed! Opening walkthrough dashboard...");
+            setScreen('dashboard');
+          },
+          (error) => {
+            console.error("GPS Error:", error);
+            alert("Unable to verify your location. Please ensure location permissions are enabled.");
+          }
+        );
+
+      } catch (err) {
+        console.log("No existing public records found or error during fetch, proceeding with caution.");
+        // If your flow allows proceeding even if public records aren't found, 
+        // handle fallback coordinate fetching here if needed.
+      }
+    };
+
     content = (
       <div style={{
         ...pageStyle,
@@ -505,26 +747,12 @@ export default function App() {
 
             <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', color: '#ffffff', fontWeight: 'bold', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>Type an MLS property number</label>
             <input
-              placeholder="Enter 7 or 8 Digit MLS ID Code"
+              placeholder="Enter 7 or 8 Digit MLS IDCode"
               value={property}
               onChange={(e) => setProperty(e.target.value.replace(/\D/g, ''))}
               onKeyDown={async (e) => {
                 if (e.key === 'Enter') {
-                  console.log("DEBUG: Enter key pressed. Property:", property, "State:", state);
-                  if (!state) {
-                    alert("Please select a state first.");
-                    return;
-                  }
-                  if (!property) {
-                    alert("Please enter an MLS number.");
-                    return;
-                  }
-                  try {
-                    await loadPublicData(property, state);
-                  } catch (err) {
-                    console.log("No existing public records found, proceeding to dashboard cleanly.");
-                  }
-                  setScreen('dashboard');
+                  await handleGeofenceAndSearch();
                 }
               }}
               style={{ ...inputStyle, backgroundColor: '#ffffff', color: '#000000', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '10px', width: '100%', boxSizing: 'border-box', fontSize: '16px', marginBottom: '15px' }}
@@ -532,23 +760,7 @@ export default function App() {
 
             <button 
               type="button"
-              onClick={async () => {
-                console.log("DEBUG: Search button clicked. Property:", property, "State:", state);
-                if (!state) {
-                  alert("Please select a state first.");
-                  return;
-                }
-                if (!property) {
-                  alert("Please enter an MLS number.");
-                  return;
-                }
-                try {
-                  await loadPublicData(property, state);
-                } catch (err) {
-                  console.log("No existing public records found, proceeding to dashboard cleanly.");
-                }
-                setScreen('dashboard'); 
-              }}
+              onClick={handleGeofenceAndSearch}
               style={{ 
                 ...buttonStyle, 
                 background: '#3b82f6',
@@ -892,6 +1104,15 @@ if (screen === 'dashboard') {
         </button>
       </div>
 
+      {propertyAddress && (
+        <div style={{ background: 'rgba(255,255,255,0.07)', padding: '15px 20px', borderRadius: '12px', marginBottom: '20px', textAlign: 'center', border: '1px solid #000000', wordBreak: 'break-word', overflowWrap: 'break-word', maxWidth: '100%' }}>
+          <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: '#60a5fa', fontWeight: 'bold' }}>Verified Property Location</span>
+          <h3 style={{ margin: '5px 0 0 0', color: '#ffffff', fontSize: '18px', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+            {typeof propertyAddress === 'object' ? cleanAddress(JSON.stringify(propertyAddress)) : cleanAddress(propertyAddress)}
+          </h3>
+        </div>
+      )}
+
       {communitySummary ? (
         <div style={{ ...cardStyle, backgroundColor: 'transparent', border: '1px solid #000000', boxShadow: 'none', textAlign: 'center', padding: '25px', marginBottom: '20px' }}>
           <div style={{ textTransform: 'uppercase', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px' }}>Community Facts Profile</div>
@@ -907,14 +1128,48 @@ if (screen === 'dashboard') {
         </div>
       )}
 
-      <div style={{ margin: '20px 0', textAlign: 'center' }}>
+<div style={{ margin: '20px 0', textAlign: 'center' }}>
         <button 
-          onClick={() => { 
+          onClick={async () => { 
             if (!session) {
               alert("Please sign in or create an account to start your own walkthrough checklist.");
               setScreen('auth');
               return;
             }
+
+            // 1. Fetch live property details to get its coordinates
+            const propertyDetails = await fetchPropertyFromMLS(property, state);
+
+            // 2. Geofence Check (Must be within 1,000 ft while on-site)
+            if (propertyDetails?.latitude && propertyDetails?.longitude) {
+              try {
+                const userCoords = await new Promise((resolve, reject) => {
+                  navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 });
+                });
+                
+                const userLat = userCoords.coords.latitude;
+                const userLon = userCoords.coords.longitude;
+                
+                const distanceInFeet = getDistanceFromLatLonInFeet(
+                  userLat, userLon, 
+                  propertyDetails.latitude, propertyDetails.longitude
+                );
+
+                console.log(`User is ${Math.round(distanceInFeet)} feet away from the property.`);
+
+                if (distanceInFeet > 1000) {
+                  alert(`Access Denied: You must be within 1,000 feet of the property to start a walkthrough. (You are currently ~${Math.round(distanceInFeet)} ft away).`);
+                  return; // Stops them from entering the walkthrough screen!
+                }
+              } catch (geoErr) {
+                console.warn("Geolocation denied or unavailable:", geoErr);
+                alert("Location access is required to verify you are on-site at the property before beginning an inspection.");
+                return;
+              }
+            }
+
+            // 3. Passed! Record the start time for the 12-hour offline grace period
+            setWalkthroughStartTime(Date.now());
             setResponses({}); 
             setNotes({}); 
             setScreen('dimensions'); 
@@ -1330,8 +1585,11 @@ if (screen === 'dimensions') {
           );
         })}
   
-        <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-          <button onClick={saveReport} style={{ ...buttonStyle, flex: 1, background: '#16a34a', border: '1px solid #000000', margin: 0 }}>
+  <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+          <button onClick={() => {
+            console.log("🔥 Summary Button Clicked Directly!");
+            saveInspection();
+          }} style={{ ...buttonStyle, flex: 1, background: '#16a34a', border: '1px solid #000000', margin: 0 }}>
             💾 Save Report to Profile
           </button>
           <button onClick={() => setScreen('home')} style={{ ...buttonStyle, flex: 1, background: '#334155', border: '1px solid #000000', margin: 0 }}>
